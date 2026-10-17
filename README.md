@@ -264,7 +264,6 @@ Detailed technical documentation is available in the [`docs/`](docs/) directory:
 - [Security Model & Defensive Principles](docs/security.md)
 - [Threat Model](docs/threat-model.md)
 - [Testing & Quality Assurance](docs/testing.md)
-- [Contributing Guidelines](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
 
 ## Release Readiness and Current Limitations
