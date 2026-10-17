@@ -309,6 +309,9 @@ void ScanController::startScan(const core::ScanConfiguration& config) {
     connect(m_worker, &ScanWorker::completed, m_workerThread, &QThread::quit);
     connect(m_worker, &ScanWorker::failed, m_workerThread, &QThread::quit);
     connect(m_worker, &ScanWorker::cancelled, m_workerThread, &QThread::quit);
+    connect(m_workerThread, &QThread::finished, this, [this]() {
+        m_running.store(false, std::memory_order_release);
+    });
 
     m_workerThread->start();
 }
@@ -326,17 +329,14 @@ void ScanController::handleWorkerProgress(int percentage, const QString& stage) 
 }
 
 void ScanController::handleWorkerCompleted(const core::ScanResult& result) {
-    m_running.store(false, std::memory_order_relaxed);
     emit scanCompleted(result);
 }
 
 void ScanController::handleWorkerFailed(const QString& error) {
-    m_running.store(false, std::memory_order_relaxed);
     emit scanFailed(error);
 }
 
 void ScanController::handleWorkerCancelled() {
-    m_running.store(false, std::memory_order_relaxed);
     emit scanCancelled();
 }
 
@@ -344,7 +344,7 @@ void ScanController::cleanupThread() {
     if (m_workerThread) {
         if (m_workerThread->isRunning()) {
             m_workerThread->quit();
-            m_workerThread->wait(1500);
+            m_workerThread->wait();
         }
         delete m_worker;
         m_worker = nullptr;

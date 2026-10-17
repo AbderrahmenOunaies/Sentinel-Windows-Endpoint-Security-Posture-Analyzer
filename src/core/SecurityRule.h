@@ -13,6 +13,7 @@ enum class ConditionOperator {
     NotEquals,
     LessThan,
     GreaterThan,
+    GreaterThanOrEqual,
     Contains,
     NotContains,
     Exists,
@@ -25,6 +26,7 @@ enum class ConditionOperator {
         case ConditionOperator::NotEquals:   return "not_equals";
         case ConditionOperator::LessThan:    return "less_than";
         case ConditionOperator::GreaterThan: return "greater_than";
+        case ConditionOperator::GreaterThanOrEqual: return "greater_than_or_equal";
         case ConditionOperator::Contains:    return "contains";
         case ConditionOperator::NotContains: return "not_contains";
         case ConditionOperator::Exists:      return "exists";
@@ -38,6 +40,7 @@ enum class ConditionOperator {
     if (op == "not_equals" || op == "!=")          return ConditionOperator::NotEquals;
     if (op == "less_than" || op == "<")            return ConditionOperator::LessThan;
     if (op == "greater_than" || op == ">")         return ConditionOperator::GreaterThan;
+    if (op == "greater_than_or_equal" || op == ">=") return ConditionOperator::GreaterThanOrEqual;
     if (op == "contains")                          return ConditionOperator::Contains;
     if (op == "not_contains")                      return ConditionOperator::NotContains;
     if (op == "exists")                            return ConditionOperator::Exists;

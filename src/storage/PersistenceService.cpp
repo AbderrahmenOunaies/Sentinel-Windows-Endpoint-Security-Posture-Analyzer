@@ -20,7 +20,10 @@ core::Result<bool> PersistenceService::initialize(const std::string& customPath)
     auto migRes = DatabaseMigrator::migrate(DatabaseManager::instance().handle());
     if (!migRes.isSuccess()) {
         LOG_ERROR("PersistenceService schema migration failed: " + migRes.errorMessage());
-        DatabaseManager::instance().close();
+        const auto closeRes = DatabaseManager::instance().close();
+        if (!closeRes.isSuccess()) {
+            LOG_ERROR("PersistenceService could not close the database after migration failure: " + closeRes.errorMessage());
+        }
         return migRes;
     }
 
@@ -32,8 +35,12 @@ core::Result<bool> PersistenceService::initialize(const std::string& customPath)
 void PersistenceService::shutdown() {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_initialized) {
-        DatabaseManager::instance().close();
-        m_initialized = false;
+        const auto closeRes = DatabaseManager::instance().close();
+        if (closeRes.isSuccess()) {
+            m_initialized = false;
+        } else {
+            LOG_ERROR("PersistenceService shutdown failed: " + closeRes.errorMessage());
+        }
         LOG_INFO("PersistenceService shutdown complete.");
     }
 }

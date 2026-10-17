@@ -16,7 +16,7 @@ DatabaseManager& DatabaseManager::instance() {
 }
 
 DatabaseManager::~DatabaseManager() {
-    close();
+    (void)close();
 }
 
 std::string DatabaseManager::getDefaultDatabasePath() {
@@ -94,13 +94,23 @@ core::Result<bool> DatabaseManager::initialize(const std::string& customPath) {
     return core::Result<bool>::success(true);
 }
 
-void DatabaseManager::close() {
-    if (m_db != nullptr) {
-        sqlite3_close(m_db);
-        m_db = nullptr;
+core::Result<bool> DatabaseManager::close() {
+    if (m_db == nullptr) {
         m_initialized = false;
-        LOG_INFO("SQLite database closed: " + m_dbPath);
+        return core::Result<bool>::success(true);
     }
+
+    const int rc = sqlite3_close(m_db);
+    if (rc != SQLITE_OK) {
+        const std::string error = sqlite3_errmsg(m_db);
+        LOG_ERROR("SQLite database close failed: " + error);
+        return core::Result<bool>::failure(core::ErrorCode::SystemError, "SQLite close error: " + error);
+    }
+
+    m_db = nullptr;
+    m_initialized = false;
+    LOG_INFO("SQLite database closed: " + m_dbPath);
+    return core::Result<bool>::success(true);
 }
 
 bool DatabaseManager::isOpen() const noexcept {

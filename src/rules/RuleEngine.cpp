@@ -3,8 +3,67 @@
 #include "core/Logger.h"
 
 #include <format>
+#include <optional>
+#include <type_traits>
 
 namespace sentinel::rules {
+
+namespace {
+
+using ActualValue = std::variant<bool, int64_t, double, std::string>;
+
+std::optional<bool> compareValue(const ActualValue& actual,
+                                core::ConditionOperator op,
+                                const core::RuleValue& expected) {
+    if (op == core::ConditionOperator::Exists) return true;
+    if (op == core::ConditionOperator::NotExists) return false;
+
+    return std::visit([op](const auto& actualValue, const auto& expectedValue) -> std::optional<bool> {
+        using ActualType = std::decay_t<decltype(actualValue)>;
+        using ExpectedType = std::decay_t<decltype(expectedValue)>;
+
+        if constexpr (std::is_same_v<ActualType, std::string> && std::is_same_v<ExpectedType, std::string>) {
+            switch (op) {
+                case core::ConditionOperator::Equals: return actualValue == expectedValue;
+                case core::ConditionOperator::NotEquals: return actualValue != expectedValue;
+                case core::ConditionOperator::Contains: return actualValue.find(expectedValue) != std::string::npos;
+                case core::ConditionOperator::NotContains: return actualValue.find(expectedValue) == std::string::npos;
+                default: return std::nullopt;
+            }
+        } else if constexpr ((std::is_same_v<ActualType, int64_t> || std::is_same_v<ActualType, double>) &&
+                             (std::is_same_v<ExpectedType, int64_t> || std::is_same_v<ExpectedType, double>)) {
+            const double actualNumber = static_cast<double>(actualValue);
+            const double expectedNumber = static_cast<double>(expectedValue);
+            switch (op) {
+                case core::ConditionOperator::Equals: return actualNumber == expectedNumber;
+                case core::ConditionOperator::NotEquals: return actualNumber != expectedNumber;
+                case core::ConditionOperator::LessThan: return actualNumber < expectedNumber;
+                case core::ConditionOperator::GreaterThan: return actualNumber > expectedNumber;
+                case core::ConditionOperator::GreaterThanOrEqual: return actualNumber >= expectedNumber;
+                default: return std::nullopt;
+            }
+        } else if constexpr (std::is_same_v<ActualType, bool> && std::is_same_v<ExpectedType, bool>) {
+            switch (op) {
+                case core::ConditionOperator::Equals: return actualValue == expectedValue;
+                case core::ConditionOperator::NotEquals: return actualValue != expectedValue;
+                default: return std::nullopt;
+            }
+        } else {
+            return std::nullopt;
+        }
+    }, actual, expected);
+}
+
+core::EvaluationState evaluateValue(const ActualValue& actual, const core::RuleCondition& condition,
+                                    std::vector<core::Evidence>& evidence,
+                                    std::string source, std::string key, std::string value) {
+    const auto comparison = compareValue(actual, condition.op, condition.value);
+    if (!comparison.has_value()) return core::EvaluationState::Unknown;
+    evidence.push_back({std::move(source), std::move(key), std::move(value)});
+    return *comparison ? core::EvaluationState::True : core::EvaluationState::False;
+}
+
+}
 
 RuleEngine::RuleEngine()
     : m_rules(DefaultRules::createInitialRuleSet()) {
@@ -12,7 +71,14 @@ RuleEngine::RuleEngine()
 }
 
 RuleEngine::RuleEngine(std::vector<core::SecurityRule> rules)
-    : m_rules(std::move(rules)) {
+    : m_rules() {
+    for (auto& rule : rules) {
+        if (rule.isValid()) {
+            m_rules.push_back(std::move(rule));
+        } else {
+            LOG_WARNING("RuleEngine: rejected malformed rule definition.");
+        }
+    }
     LOG_INFO(std::format("RuleEngine initialized with {} custom security rules.", m_rules.size()));
 }
 
@@ -28,28 +94,24 @@ core::EvaluationState RuleEngine::evaluateCondition(
     if (field == "Firewall.Domain.Enabled") {
         if (!context.firewall || !context.firewall->collected) return core::EvaluationState::Unknown;
         bool actual = context.firewall->domain.enabled;
-        outEvidence.push_back({ "FirewallCollector", "Domain.Enabled", actual ? "true" : "false" });
-        return actual ? core::EvaluationState::True : core::EvaluationState::False;
+        return evaluateValue(actual, condition, outEvidence, "FirewallCollector", "Domain.Enabled", actual ? "true" : "false");
     }
     if (field == "Firewall.Private.Enabled") {
         if (!context.firewall || !context.firewall->collected) return core::EvaluationState::Unknown;
         bool actual = context.firewall->privateProfile.enabled;
-        outEvidence.push_back({ "FirewallCollector", "Private.Enabled", actual ? "true" : "false" });
-        return actual ? core::EvaluationState::True : core::EvaluationState::False;
+        return evaluateValue(actual, condition, outEvidence, "FirewallCollector", "Private.Enabled", actual ? "true" : "false");
     }
     if (field == "Firewall.Public.Enabled") {
         if (!context.firewall || !context.firewall->collected) return core::EvaluationState::Unknown;
         bool actual = context.firewall->publicProfile.enabled;
-        outEvidence.push_back({ "FirewallCollector", "Public.Enabled", actual ? "true" : "false" });
-        return actual ? core::EvaluationState::True : core::EvaluationState::False;
+        return evaluateValue(actual, condition, outEvidence, "FirewallCollector", "Public.Enabled", actual ? "true" : "false");
     }
     if (field == "Firewall.Public.DefaultInboundAction") {
         if (!context.firewall || !context.firewall->collected) return core::EvaluationState::Unknown;
         auto action = context.firewall->publicProfile.defaultInboundAction;
         if (action == core::FirewallAction::Unknown) return core::EvaluationState::Unknown;
         std::string actual = std::string(core::firewallActionToString(action));
-        outEvidence.push_back({ "FirewallCollector", "Public.DefaultInboundAction", actual });
-        return (action == core::FirewallAction::Block) ? core::EvaluationState::True : core::EvaluationState::False;
+        return evaluateValue(actual, condition, outEvidence, "FirewallCollector", "Public.DefaultInboundAction", actual);
     }
 
     // --- DEFENDER RULES ---
@@ -58,32 +120,28 @@ core::EvaluationState RuleEngine::evaluateCondition(
             return core::EvaluationState::Unknown;
         }
         bool actual = *context.defender->antivirusEnabled;
-        outEvidence.push_back({ "DefenderCollector", "AntivirusEnabled", actual ? "true" : "false" });
-        return actual ? core::EvaluationState::True : core::EvaluationState::False;
+        return evaluateValue(actual, condition, outEvidence, "DefenderCollector", "AntivirusEnabled", actual ? "true" : "false");
     }
     if (field == "Defender.RealTimeProtectionEnabled") {
         if (!context.defender || !context.defender->collected || !context.defender->realTimeProtectionEnabled.has_value()) {
             return core::EvaluationState::Unknown;
         }
         bool actual = *context.defender->realTimeProtectionEnabled;
-        outEvidence.push_back({ "DefenderCollector", "RealTimeProtectionEnabled", actual ? "true" : "false" });
-        return actual ? core::EvaluationState::True : core::EvaluationState::False;
+        return evaluateValue(actual, condition, outEvidence, "DefenderCollector", "RealTimeProtectionEnabled", actual ? "true" : "false");
     }
     if (field == "Defender.AntispywareEnabled") {
         if (!context.defender || !context.defender->collected || !context.defender->antispywareEnabled.has_value()) {
             return core::EvaluationState::Unknown;
         }
         bool actual = *context.defender->antispywareEnabled;
-        outEvidence.push_back({ "DefenderCollector", "AntispywareEnabled", actual ? "true" : "false" });
-        return actual ? core::EvaluationState::True : core::EvaluationState::False;
+        return evaluateValue(actual, condition, outEvidence, "DefenderCollector", "AntispywareEnabled", actual ? "true" : "false");
     }
     if (field == "Defender.BehaviorMonitoringEnabled") {
         if (!context.defender || !context.defender->collected || !context.defender->behaviorMonitoringEnabled.has_value()) {
             return core::EvaluationState::Unknown;
         }
         bool actual = *context.defender->behaviorMonitoringEnabled;
-        outEvidence.push_back({ "DefenderCollector", "BehaviorMonitoringEnabled", actual ? "true" : "false" });
-        return actual ? core::EvaluationState::True : core::EvaluationState::False;
+        return evaluateValue(actual, condition, outEvidence, "DefenderCollector", "BehaviorMonitoringEnabled", actual ? "true" : "false");
     }
 
     // --- AUTHENTICATION RULES ---
@@ -102,26 +160,30 @@ core::EvaluationState RuleEngine::evaluateCondition(
             threshold = *integerOverride;
         }
 
-        outEvidence.push_back({ "AuthenticationCollector", "MinimumPasswordLength", std::to_string(actual) });
-        outEvidence.push_back({ "SecurityProfile", "ExpectedBaseline", std::format(">={}", threshold) });
-
-        return (actual >= threshold) ? core::EvaluationState::True : core::EvaluationState::False;
+        core::RuleCondition effectiveCondition = condition;
+        effectiveCondition.op = core::ConditionOperator::GreaterThanOrEqual;
+        effectiveCondition.value = threshold;
+        const auto state = evaluateValue(actual, effectiveCondition, outEvidence,
+                                         "AuthenticationCollector", "MinimumPasswordLength", std::to_string(actual));
+        if (state != core::EvaluationState::Unknown) {
+            outEvidence.push_back({ "SecurityProfile", "ExpectedBaseline", std::format(">={}", threshold) });
+        }
+        return state;
     }
     if (field == "Authentication.PasswordComplexityRequired") {
         if (!context.authentication || !context.authentication->collected || !context.authentication->passwordComplexityRequired.has_value()) {
             return core::EvaluationState::Unknown;
         }
         bool actual = *context.authentication->passwordComplexityRequired;
-        outEvidence.push_back({ "AuthenticationCollector", "PasswordComplexityRequired", actual ? "true" : "false" });
-        return actual ? core::EvaluationState::True : core::EvaluationState::False;
+        return evaluateValue(actual, condition, outEvidence, "AuthenticationCollector", "PasswordComplexityRequired", actual ? "true" : "false");
     }
     if (field == "Authentication.LockoutThreshold") {
         if (!context.authentication || !context.authentication->collected || !context.authentication->lockoutThreshold.has_value()) {
             return core::EvaluationState::Unknown;
         }
         uint32_t actual = *context.authentication->lockoutThreshold;
-        outEvidence.push_back({ "AuthenticationCollector", "LockoutThreshold", std::to_string(actual) });
-        return (actual > 0) ? core::EvaluationState::True : core::EvaluationState::False;
+        return evaluateValue(static_cast<int64_t>(actual), condition, outEvidence,
+                             "AuthenticationCollector", "LockoutThreshold", std::to_string(actual));
     }
 
     // --- ENCRYPTION RULES ---
@@ -134,8 +196,7 @@ core::EvaluationState RuleEngine::evaluateCondition(
             return core::EvaluationState::Unknown;
         }
         std::string actualStr = std::string(core::encryptionStateToString(vol.state));
-        outEvidence.push_back({ "EncryptionCollector", "Volume C: State", actualStr });
-        return (vol.state == core::EncryptionState::FullyEncrypted) ? core::EvaluationState::True : core::EvaluationState::False;
+        return evaluateValue(actualStr, condition, outEvidence, "EncryptionCollector", "Volume C: State", actualStr);
     }
 
     // --- UPDATES RULES ---
@@ -144,17 +205,14 @@ core::EvaluationState RuleEngine::evaluateCondition(
             return core::EvaluationState::Unknown;
         }
         bool rebootPending = *context.updates->rebootRequired;
-        outEvidence.push_back({ "UpdateCollector", "RebootRequired", rebootPending ? "true" : "false" });
-        // Fails when reboot is required
-        return (!rebootPending) ? core::EvaluationState::True : core::EvaluationState::False;
+        return evaluateValue(rebootPending, condition, outEvidence, "UpdateCollector", "RebootRequired", rebootPending ? "true" : "false");
     }
     if (field == "Updates.ServiceRunning") {
         if (!context.updates || !context.updates->collected || !context.updates->updateServiceRunning.has_value()) {
             return core::EvaluationState::Unknown;
         }
         bool running = *context.updates->updateServiceRunning;
-        outEvidence.push_back({ "UpdateCollector", "UpdateServiceRunning", running ? "true" : "false" });
-        return running ? core::EvaluationState::True : core::EvaluationState::False;
+        return evaluateValue(running, condition, outEvidence, "UpdateCollector", "UpdateServiceRunning", running ? "true" : "false");
     }
 
     return core::EvaluationState::Unknown;

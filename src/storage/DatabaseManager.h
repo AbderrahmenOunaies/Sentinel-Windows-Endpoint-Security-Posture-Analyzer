@@ -20,7 +20,7 @@ public:
     DatabaseManager& operator=(DatabaseManager&&) = delete;
 
     [[nodiscard]] core::Result<bool> initialize(const std::string& customPath = "");
-    void close();
+    [[nodiscard]] core::Result<bool> close();
 
     [[nodiscard]] bool isOpen() const noexcept;
     [[nodiscard]] sqlite3* handle() const noexcept { return m_db; }

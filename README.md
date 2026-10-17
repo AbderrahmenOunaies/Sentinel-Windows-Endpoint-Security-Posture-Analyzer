@@ -40,10 +40,28 @@ cmake -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
 
+Set `CMAKE_PREFIX_PATH` to the Qt/MinGW installation when Qt is not discoverable automatically, for example:
+
+```powershell
+cmake -S . -B build-final -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/msys64/mingw64
+```
+
 ### Running Tests
 
 ```powershell
 ctest --test-dir build --output-on-failure
+```
+
+The default CTest run includes deterministic unit tests and a separately named Windows integration test. Run only the deterministic suite with:
+
+```powershell
+ctest --test-dir build-final -R SentinelUnitTests --output-on-failure
+```
+
+Run the host-dependent collector checks explicitly with:
+
+```powershell
+ctest --test-dir build-final -R SentinelWindowsIntegrationTests --output-on-failure
 ```
 
 ### Running Sentinel
@@ -98,7 +116,7 @@ script instead. It also stages ICU and the MinGW runtime DLLs that Qt loads
 dynamically:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\deploy-windows.ps1 -BuildDirectory build-final -OutputDirectory release
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy-windows.ps1 -BuildDirectory build-final -OutputDirectory release -MingwBin C:/msys64/mingw64/bin
 ```
 
 Keep the staged DLLs beside `sentinel.exe`; do not launch it from a development
@@ -255,5 +273,5 @@ Detailed technical documentation is available in the [`docs/`](docs/) directory:
 - The remediation button currently records an operator-intent hook only. No firewall, service, account, Defender, encryption, or other system modification is executed.
 - JSON and HTML report generation, continuous monitoring, baseline comparison, and configurable external rule-file loading are not implemented in this release.
 - Automated tests include host-dependent Windows integration checks. A successful build does not prove that every collector behaves identically on every Windows edition or privilege level.
-- The MIT license is prepared in `LICENSE`, but its copyright-holder placeholder must be replaced and verified before publishing to GitHub.
+- The project is distributed under the MIT license in `LICENSE`.
 

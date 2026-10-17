@@ -150,7 +150,7 @@ std::vector<core::SecurityRule> DefaultRules::createInitialRuleSet() {
         .description = "Configured minimum password length does not meet the selected profile baseline.",
         .condition = {
             .field = "Authentication.MinimumPasswordLength",
-            .op = core::ConditionOperator::GreaterThan,
+            .op = core::ConditionOperator::GreaterThanOrEqual,
             .value = static_cast<int64_t>(8)
         },
         .recommendation = "Increase the minimum password length policy using secpol.msc or Group Policy.",

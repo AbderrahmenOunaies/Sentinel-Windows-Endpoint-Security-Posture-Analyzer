@@ -383,6 +383,54 @@ void testMilestone4SecurityModels() {
     LOG_INFO("Milestone 4 Synthetic Security Models verified.");
 }
 
+void testEncryptionQueryOutcomes() {
+    LOG_INFO("--- Testing deterministic encryption query outcomes ---");
+
+    const auto collectState = [](sentinel::collectors::EncryptionCollector::QueryStatus status) {
+        sentinel::collectors::EncryptionCollector collector([status]() {
+            sentinel::collectors::EncryptionCollector::QueryResult result;
+            result.status = status;
+            return result;
+        });
+        auto result = collector.collect();
+        assert(result.isSuccess());
+        assert(result.value().collected);
+        assert(result.value().volumes.size() == 1);
+        return result.value().volumes.front().state;
+    };
+
+    assert(collectState(sentinel::collectors::EncryptionCollector::QueryStatus::Encrypted) == EncryptionState::FullyEncrypted);
+    assert(collectState(sentinel::collectors::EncryptionCollector::QueryStatus::NotEncrypted) == EncryptionState::NotEncrypted);
+    assert(collectState(sentinel::collectors::EncryptionCollector::QueryStatus::AccessDenied) == EncryptionState::Unknown);
+    assert(collectState(sentinel::collectors::EncryptionCollector::QueryStatus::NotSupported) == EncryptionState::Unknown);
+    assert(collectState(sentinel::collectors::EncryptionCollector::QueryStatus::Unavailable) == EncryptionState::Unknown);
+    assert(collectState(sentinel::collectors::EncryptionCollector::QueryStatus::Error) == EncryptionState::Unknown);
+
+    SecurityContext context;
+    EncryptionSnapshot encryption;
+    encryption.collected = true;
+    encryption.volumes.push_back({
+        .volume = "C:",
+        .state = EncryptionState::Unknown,
+        .encryptionPercentage = std::nullopt,
+        .encryptionMethod = std::nullopt,
+        .protectionEnabled = std::nullopt
+    });
+    context.encryption = encryption;
+    RuleEngine engine;
+    auto evaluation = engine.evaluate(context, SecurityProfile::createDefault(ProfileType::Standard));
+    for (const auto& rule : evaluation.evaluations) {
+        if (rule.ruleId == "ENC-001") {
+            assert(rule.outcome == RuleOutcome::Unknown);
+        }
+    }
+    for (const auto& finding : evaluation.findings) {
+        assert(finding.ruleId != "ENC-001");
+    }
+
+    LOG_INFO("Encryption query outcomes and Unknown propagation verified.");
+}
+
 void testMilestone4NativeCollectors() {
     LOG_INFO("--- Testing Milestone 4 Native Windows Security Collectors ---");
 
@@ -611,6 +659,48 @@ void testMalformedProfileOverrideDoesNotAbortEvaluation() {
     }
 
     LOG_INFO("Malformed profile overrides safely produce Unknown evaluation.");
+}
+
+void testRuleOperatorsAndValidation() {
+    LOG_INFO("--- Testing rule operators and validation ---");
+
+    FirewallSnapshot firewall;
+    firewall.collected = true;
+    firewall.publicProfile.enabled = true;
+    SecurityContext context;
+    context.firewall = firewall;
+
+    SecurityRule notEqualsRule{
+        .id = "TEST-NE",
+        .name = "Public firewall must not be disabled",
+        .category = "Firewall",
+        .severity = Severity::Low,
+        .description = "Test rule",
+        .condition = {.field = "Firewall.Public.Enabled", .op = ConditionOperator::NotEquals, .value = false},
+        .recommendation = "Test recommendation",
+        .remediationAvailable = false,
+        .remediationId = ""
+    };
+    SecurityRule containsRule{
+        .id = "TEST-CONTAINS",
+        .name = "Encryption state contains expected text",
+        .category = "Encryption",
+        .severity = Severity::Low,
+        .description = "Test rule",
+        .condition = {.field = "Encryption.OSVolume.State", .op = ConditionOperator::Contains, .value = std::string("Encrypted")},
+        .recommendation = "Test recommendation",
+        .remediationAvailable = false,
+        .remediationId = ""
+    };
+    SecurityRule invalidRule;
+
+    RuleEngine engine({notEqualsRule, containsRule, invalidRule});
+    auto result = engine.evaluate(context, SecurityProfile::createDefault(ProfileType::Standard));
+    assert(result.evaluations.size() == 2);
+    assert(result.evaluations[0].outcome == RuleOutcome::Pass);
+    assert(result.evaluations[1].outcome == RuleOutcome::Unknown);
+
+    LOG_INFO("Rule operators and malformed-rule rejection verified.");
 }
 
 void testMilestone5EndToEndIntegration() {
@@ -959,7 +1049,9 @@ void testMilestone8StorageAndPersistence() {
 int main() {
     LOG_INFO("Starting Sentinel Milestone 1-8 Unit & Integration Tests...");
 
+#ifdef SENTINEL_INTEGRATION_TESTS
     testMilestone1Platform();
+#endif
     testSeverityConversionsAndPenalties();
     testSecurityScoreCalculation();
     testSecurityProfiles();
@@ -967,14 +1059,22 @@ int main() {
     testEvidenceAndFindingStructures();
 
     testMilestone3SyntheticModels();
+#ifdef SENTINEL_INTEGRATION_TESTS
     testMilestone3NativeCollectors();
+#endif
 
     testMilestone4SecurityModels();
+    testEncryptionQueryOutcomes();
+#ifdef SENTINEL_INTEGRATION_TESTS
     testMilestone4NativeCollectors();
+#endif
 
     testMilestone5SyntheticRuleEvaluations();
     testMalformedProfileOverrideDoesNotAbortEvaluation();
+    testRuleOperatorsAndValidation();
+#ifdef SENTINEL_INTEGRATION_TESTS
     testMilestone5EndToEndIntegration();
+#endif
 
     testMilestone6ScanResultAndTraceability();
     testMilestone6PartialCollectionAndErrors();

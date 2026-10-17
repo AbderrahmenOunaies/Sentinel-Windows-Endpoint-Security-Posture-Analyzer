@@ -170,3 +170,20 @@ if (WIN32)
 endif()
 
 add_test(NAME SentinelUnitTests COMMAND sentinel_tests)
+
+get_target_property(SENTINEL_TEST_SOURCE_LIST sentinel_tests SOURCES)
+add_executable(sentinel_integration_tests ${SENTINEL_TEST_SOURCE_LIST})
+target_compile_definitions(sentinel_integration_tests PRIVATE SENTINEL_INTEGRATION_TESTS)
+target_link_libraries(sentinel_integration_tests PRIVATE sqlite3)
+
+if (MSVC)
+    target_compile_options(sentinel_integration_tests PRIVATE /UNDEBUG)
+else()
+    target_compile_options(sentinel_integration_tests PRIVATE -UNDEBUG)
+endif()
+
+if (WIN32)
+    target_link_libraries(sentinel_integration_tests PRIVATE advapi32 iphlpapi ws2_32 ole32 oleaut32 netapi32 shell32)
+endif()
+
+add_test(NAME SentinelWindowsIntegrationTests COMMAND sentinel_integration_tests)
