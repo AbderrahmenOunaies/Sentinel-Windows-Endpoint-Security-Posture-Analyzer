@@ -1,0 +1,29 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "windows-ninja",
+      "displayName": "Windows Ninja (MinGW-w64 x86_64)",
+      "description": "Configure build using Ninja and MinGW GCC with Qt6",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_STANDARD": "20",
+        "CMAKE_PREFIX_PATH": "C:/msys64/mingw64"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-ninja",
+      "configurePreset": "windows-ninja"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-ninja",
+      "configurePreset": "windows-ninja"
+    }
+  ]
+}
